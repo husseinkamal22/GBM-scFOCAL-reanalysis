@@ -17,7 +17,7 @@ library(BiocSingular)
 set.seed(100)          # عشان الكلسترينج يطلع نفس الأرقام كل مرة تشغّل السكريبت
 
 # --- Paths ---
-base_dir   <- here::here()
+base_dir   <- "D:/GBM-scFOCAL-reanalysis"
 data_dir   <- file.path(base_dir, "data")
 output_dir <- file.path(base_dir, "output")
 fig_dir    <- file.path(base_dir, "figures")
