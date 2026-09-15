@@ -138,8 +138,8 @@ marker_to_type <- c(
   PTPRC = "Myeloid", AIF1 = "Myeloid", CD14 = "Myeloid",
   CD3D = "T cells", CD3E = "T cells", CD2 = "T cells",
   MBP = "Oligodendrocytes", PLP1 = "Oligodendrocytes", MOG = "Oligodendrocytes",
-  PECAM1 = "Endothelial_Fibroblast", VWF = "Endothelial_Fibroblast", CLDN5 = "Endothelial_Fibroblast",
-  COL1A1 = "Endothelial_Fibroblast", DCN = "Endothelial_Fibroblast"
+  PECAM1 = "Endothelial", VWF = "Endothelial", CLDN5 = "Endothelial",
+  COL1A1 = "Fibroblast", DCN = "Fibroblast"
 )
 
 p_dot <- DotPlot(sc, features = canonical_markers, group.by = "seurat_clusters") +
