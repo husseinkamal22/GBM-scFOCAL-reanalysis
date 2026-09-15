@@ -82,9 +82,6 @@ sc$doublet_score <- colData(sce_dbl)$scDblFinder.score
 sc$doublet_class <- colData(sce_dbl)$scDblFinder.class
 rm(sce_dbl)
 
-p_dbl <- DimPlot(sc, group.by = "doublet_class") + ggtitle("Doublet Detection")
-ggsave(file.path(fig_dir, "02_doublets.png"), p_dbl, width = 8, height = 6)
-
 cat("  Before:", ncol(sc), "cells\n")
 sc <- subset(sc, doublet_class == "singlet")
 cat("  After:", ncol(sc), "cells\n")
@@ -104,7 +101,7 @@ cat("Running PCA...\n")
 sc <- RunPCA(sc, npcs = 50)
 
 p_elbow <- ElbowPlot(sc, ndims = 50)
-ggsave(file.path(fig_dir, "03_elbow_plot.png"), p_elbow, width = 6, height = 4)
+ggsave(file.path(fig_dir, "02_elbow_plot.png"), p_elbow, width = 6, height = 4)
 
 # ============================================
 # 8. Clustering & UMAP
@@ -113,6 +110,9 @@ cat("Clustering...\n")
 sc <- FindNeighbors(sc, dims = 1:12)
 sc <- FindClusters(sc, resolution = 0.5)
 sc <- RunUMAP(sc, dims = 1:12)
+
+p_dbl <- DimPlot(sc, group.by = "doublet_class") + ggtitle("Doublet Detection")
+ggsave(file.path(fig_dir, "03_doublets.png"), p_dbl, width = 8, height = 6)
 
 p_umap_clusters <- DimPlot(sc, group.by = "seurat_clusters", label = TRUE, repel = TRUE) +
   ggtitle("Clusters")
