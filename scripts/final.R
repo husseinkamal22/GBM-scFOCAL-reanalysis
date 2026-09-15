@@ -7,6 +7,9 @@ library(data.table)
 library(ggplot2)
 library(dplyr)
 library(patchwork)
+library(scDblFinder)
+library(SingleR)
+library(BiocSingular)
 
 # --- Paths ---
 base_dir <- here::here()
@@ -43,20 +46,37 @@ sc <- CreateSeuratObject(
 rm(counts_sparse)
 
 # ============================================
-# 3. QC & Filtering
+# 3. QC
 # ============================================
-cat("QC & filtering...\n")
+cat("QC...\n")
 sc[["percent.mt"]] <- PercentageFeatureSet(sc, pattern = "^MT-")
 
 p_qc <- VlnPlot(sc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
 ggsave(file.path(fig_dir, "01_qc_violin.png"), p_qc, width = 12, height = 4)
 
+# ============================================
+# 4. Doublet Detection (scDblFinder)
+# ============================================
+cat("Detecting doublets...\n")
+sc <- scDblFinder(sc, dbr = 0.01)
+
+p_dbl <- DimPlot(sc, group.by = "scDblFinder.class") +
+  ggtitle("Doublet Detection")
+ggsave(file.path(fig_dir, "02_doublets.png"), p_dbl, width = 8, height = 6)
+
 cat("  Before:", ncol(sc), "cells\n")
-sc <- subset(sc, nFeature_RNA > 500 & nFeature_RNA < 4500 & percent.mt < 10)
+sc <- subset(sc, scDblFinder.class == "singlet")
 cat("  After:", ncol(sc), "cells\n")
 
 # ============================================
-# 4. Normalization & Scaling
+# 5. Filter
+# ============================================
+cat("Filtering...\n")
+sc <- subset(sc, nFeature_RNA > 200 & nFeature_RNA < 4500 & percent.mt < 10)
+cat("  After filtering:", ncol(sc), "cells\n")
+
+# ============================================
+# 6. Normalize & Scale
 # ============================================
 cat("Normalizing...\n")
 sc <- NormalizeData(sc)
@@ -64,16 +84,16 @@ sc <- FindVariableFeatures(sc, nfeatures = 2000)
 sc <- ScaleData(sc)
 
 # ============================================
-# 5. Dimensionality Reduction
+# 7. Dimensionality Reduction
 # ============================================
 cat("Running PCA...\n")
 sc <- RunPCA(sc, npcs = 50)
 
 p_elbow <- ElbowPlot(sc, ndims = 50)
-ggsave(file.path(fig_dir, "02_elbow_plot.png"), p_elbow, width = 6, height = 4)
+ggsave(file.path(fig_dir, "03_elbow_plot.png"), p_elbow, width = 6, height = 4)
 
 # ============================================
-# 6. Clustering & UMAP
+# 8. Clustering & UMAP
 # ============================================
 cat("Clustering...\n")
 sc <- FindNeighbors(sc, dims = 1:12)
@@ -82,54 +102,59 @@ sc <- RunUMAP(sc, dims = 1:12)
 
 p_umap_clusters <- DimPlot(sc, group.by = "seurat_clusters", label = TRUE, repel = TRUE) +
   ggtitle("Clusters")
-ggsave(file.path(fig_dir, "03_umap_clusters.png"), p_umap_clusters, width = 10, height = 8)
+ggsave(file.path(fig_dir, "04_umap_clusters.png"), p_umap_clusters, width = 10, height = 8)
 
 # ============================================
-# 7. Cell State Annotation
+# 9. Automated Annotation (SingleR)
+# ============================================
+cat("Running SingleR...\n")
+sce <- as.SingleCellExperiment(sc)
+ref <- celldex::HumanPrimaryCellAtlasData()
+singler_results <- SingleR(
+  test = sce,
+  ref = ref,
+  labels = ref$label.main,
+  assay.type.test = "logcounts"
+)
+sc$singler_labels <- singler_results$pruned.labels
+
+p_singler <- DimPlot(sc, group.by = "singler_labels", label = TRUE, repel = TRUE, size = 0.5) +
+  ggtitle("SingleR Annotation") +
+  NoLegend()
+ggsave(file.path(fig_dir, "05_umap_singler.png"), p_singler, width = 12, height = 8)
+
+# ============================================
+# 10. Manual Cell State Annotation
 # ============================================
 cat("Annotating cell states...\n")
 canonical_markers <- list(
-  "AC-like" = c("GFAP", "AQP4", "S100B"),
-  "NPC-like" = c("SOX2", "NES", "VIM"),
-  "OPC-like" = c("OLIG2", "PDGFRA", "CSPG4"),
-  "MES-like" = c("CHI3L1", "CD44", "ANGPTL4"),
-  "Oligodendrocytes" = c("MBP", "PLP1", "MOG"),
+  "Neoplastic" = c("EGFR", "VIM", "SOX2"),
   "Myeloid" = c("CSF1R", "CD68", "C1QB"),
-  "T-Cells" = c("CD3D", "CD3E", "IL7R")
+  "T-Cells" = c("CD3D", "CD3E", "IL7R"),
+  "Oligodendrocytes" = c("MBP", "PLP1", "MOG")
 )
 
 p_dot <- DotPlot(sc, features = unlist(canonical_markers), group.by = "seurat_clusters") +
   RotatedAxis() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
-ggsave(file.path(fig_dir, "04_dotplot_markers.png"), p_dot, width = 14, height = 6)
+ggsave(file.path(fig_dir, "06_dotplot_markers.png"), p_dot, width = 10, height = 6)
 
-sc$cell_state <- NA
-sc$cell_state[sc$seurat_clusters %in% c(12)] <- "NPC-like"
-sc$cell_state[sc$seurat_clusters %in% c(4, 8, 13, 16)] <- "AC-like"
+# Manual labeling based on DotPlot + SingleR
+sc$cell_state <- "Unknown"
+sc$cell_state[sc$seurat_clusters %in% c(0, 1, 5, 9, 12, 21)] <- "Neoplastic"
 sc$cell_state[sc$seurat_clusters %in% c(10, 11, 19)] <- "Myeloid"
-sc$cell_state[sc$seurat_clusters %in% c(3, 6, 7, 14, 17, 18, 23)] <- "OPC-like"
-sc$cell_state[sc$seurat_clusters %in% c(0, 1, 5, 9, 21)] <- "MES-like"
-sc$cell_state[sc$seurat_clusters %in% c(22)] <- "Oligodendrocytes"
 sc$cell_state[sc$seurat_clusters %in% c(20)] <- "T-Cells"
-sc$cell_state[sc$seurat_clusters %in% c(15)] <- "Immune"
+sc$cell_state[sc$seurat_clusters %in% c(22)] <- "Oligodendrocytes"
 sc$cell_state[sc$seurat_clusters %in% c(2, 24)] <- "Unknown"
 
 p_umap_states <- DimPlot(sc, group.by = "cell_state", label = TRUE, repel = TRUE) +
   ggtitle("Cell States")
-ggsave(file.path(fig_dir, "05_umap_cell_states.png"), p_umap_states, width = 10, height = 8)
+ggsave(file.path(fig_dir, "07_umap_cell_states.png"), p_umap_states, width = 10, height = 8)
 
 # ============================================
-# 8. Find Markers (uncomment when ready — slow on large datasets)
+# 11. Save
 # ============================================
-# cat("Finding markers...\n")
-# markers <- FindAllMarkers(sc, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
-#
-# top5 <- markers %>%
-#   group_by(cluster) %>%
-#   slice_max(avg_log2FC, n = 5)
-#
-# write.csv(top5, file.path(output_dir, "top5_markers.csv"), row.names = FALSE)
-# write.csv(markers, file.path(output_dir, "all_markers.csv"), row.names = FALSE)
+cat("Saving...\n")
 saveRDS(sc, file.path(output_dir, "gbm_seurat_object.rds"))
 
 cat("Done!\n")
